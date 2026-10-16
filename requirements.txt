@@ -1,0 +1,8 @@
+numpy==1.26.4
+trimesh==4.6.8
+manifold3d==3.0.1
+matplotlib==3.9.4
+networkx==3.2.1
+scipy==1.13.1
+fast-simplification==0.1.7
+cadquery-ocp==7.7.2

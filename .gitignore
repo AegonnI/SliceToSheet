@@ -1,0 +1,26 @@
+# Local-only files stay private; publish only the application and build sources.
+/*
+!/.gitignore
+!/app.py
+!/launcher.py
+!/slicer.py
+!/pipeline.py
+!/keys.py
+!/marking.py
+!/step_import.py
+!/README.md
+!/QUICKSTART_RU.txt
+!/requirements.txt
+!/requirements-build.txt
+!/SliceToSheet.spec
+!/BUILD_WINDOWS.bat
+!/build_release.py
+!/VERSION
+!/THIRD_PARTY_NOTICES.md
+
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.pem
+*.key
