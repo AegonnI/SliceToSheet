@@ -17,16 +17,20 @@ def check_installation(destination):
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
         from slicer import Settings, load_model, run
-        from app import App, preview_mesh
+        from app import App, preview_mesh, application
 
         window = App()
-        window.withdraw()
-        window.update_idletasks()
+        window.show()
+        application().processEvents()
         preview = preview_mesh(trimesh.creation.icosphere(subdivisions=3), 300)
         window.draw([preview], 'SliceToSheet installation check')
-        window.canvas.draw()
-        window.destroy()
-        result['checks'].append('Tk desktop, Matplotlib 3D and mesh simplification')
+        window.plotter.render()
+        application().processEvents()
+        window.plotter.screenshot(str(Path(destination).with_suffix('.png')))
+        result['renderer'] = window.plotter.ren_win.GetClassName()
+        window.close()
+        application().processEvents()
+        result['checks'].append('Qt desktop, VTK 3D viewport and mesh simplification')
 
         with tempfile.TemporaryDirectory(prefix='SliceToSheet_') as temp:
             root = Path(temp)
@@ -43,11 +47,15 @@ def check_installation(destination):
             mesh.export(stl)
             load_model(stl, Settings())
             output = root / 'output'
-            report = run(source, output, Settings(), log=lambda _: None)
+            report = run(source, output, Settings(export_format='both'), log=lambda _: None)
             if report['layer_count'] != 2 or len(report['parts']) != 2:
                 raise RuntimeError('Unexpected slicing result')
             if not list((output / 'sections_a4').glob('*.svg')):
                 raise RuntimeError('SVG export missing')
+            if not list((output / 'sections_a4').glob('*.dxf')):
+                raise RuntimeError('DXF export missing')
+            if not (output / 'metrics.csv').is_file() or report['metrics']['totals']['net_area_mm2'] <= 0:
+                raise RuntimeError('Manufacturing measurements missing')
             assembly = trimesh.load(output / 'assembly.stl', force='mesh', process=False)
             # Touching parts stay separate in the assembly; welding their
             # coincident vertices would create artificial non-manifold edges.
@@ -56,7 +64,26 @@ def check_installation(destination):
                 if not trimesh.load(part, force='mesh').is_volume:
                     raise RuntimeError('Invalid part STL: ' + part.name)
             run(source, output, resume=True, log=lambda _: None)
-            result['checks'].append('STL import, slicing, dowels, STL/SVG export and resume')
+            result['checks'].append('STL import, slicing, dowels, STL/SVG/DXF export, measurements and resume')
+            from pipeline import load_layer_meshes
+            no_stl = root/'without_stl'
+            run(stl, no_stl, Settings(export_format='dxf', export_parts_stl=False,
+                                    export_assembly_stl=False), log=lambda _: None)
+            if (no_stl/'stl').exists() or (no_stl/'assembly.stl').exists() or not load_layer_meshes(no_stl, 1):
+                raise RuntimeError('Independent exports or database layer viewer failed')
+            result['checks'].append('Optional STL exports and database layer preview')
+            import manifold3d as md
+            from slicer import from_solid
+            shell = root/'shell.stl'
+            outer = md.Manifold.cube([80,80,100])
+            cavity = md.Manifold.cube([60,60,80]).translate([10,10,10])
+            from_solid(outer-cavity).export(shell)
+            framed = run(shell, root/'frames', Settings(frames=True, hull_wall=10,
+                         frame_interval=3, frame_coefficient=1.5, export_parts_stl=False,
+                         export_assembly_stl=False), log=lambda _: None)
+            if framed['frames']['added_volume_mm3'] <= 0:
+                raise RuntimeError('Frame geometry failed')
+            result['checks'].append('Native Open3D/scikit-image frame geometry')
         result['ok'] = True
     except Exception:
         result['error'] = traceback.format_exc()
@@ -71,4 +98,4 @@ if __name__ == '__main__':
     if args.check_installation:
         sys.exit(check_installation(args.check_installation))
     from app import App
-    App().mainloop()
+    sys.exit(App().mainloop())

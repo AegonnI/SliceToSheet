@@ -12,11 +12,25 @@
 !/QUICKSTART_RU.txt
 !/requirements.txt
 !/requirements-build.txt
+!/requirements-lock.txt
 !/SliceToSheet.spec
 !/BUILD_WINDOWS.bat
 !/build_release.py
 !/VERSION
 !/THIRD_PARTY_NOTICES.md
+!/desktop_ui.py
+!/model_preview.py
+!/sections.py
+!/frames.py
+!/hollow.py
+!/START_WINDOWS.bat
+!/CHANGELOG.md
+!/docs/
+!/docs/**
+!/tests/
+!/tests/**
+!/tools/
+!/tools/**
 
 __pycache__/
 *.py[cod]
