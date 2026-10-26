@@ -1,4 +1,4 @@
-SliceToSheet 1.2.0 — Windows x64
+SliceToSheet 1.2.1 — Windows x64
 
 1. Полностью распакуйте ZIP в отдельную папку и запустите SliceToSheet.exe.
    Python и установка библиотек для готового выпуска не нужны.

@@ -86,7 +86,7 @@ def check_installation(destination):
             result['checks'].append('Native Open3D/scikit-image frame geometry')
             stiffened = run(shell, root/'stringers', Settings(stringers=True, stringer_spacing=50,
                             stringer_depth=10, stringer_height=8, frames=True, hull_wall=10,
-                            frame_interval=3, frame_coefficient=1.5, export_parts_stl=False,
+                            frame_interval=3, frame_coefficient=1.5, frame_layers=1, stringer_up='-X', export_parts_stl=False,
                             export_assembly_stl=False), log=lambda _: None)
             if stiffened['stringers']['added_volume_mm3'] <= 0 or stiffened['frames']['added_volume_mm3'] <= 0:
                 raise RuntimeError('Combined stringer/frame geometry failed')

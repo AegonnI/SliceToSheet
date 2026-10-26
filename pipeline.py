@@ -409,6 +409,8 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
             report['frames']=dict(layer_numbers=[k+1 for k in range(count) if is_frame_layer(k,cfg)],
                                   original_wall_mm=cfg.hull_wall,frame_wall_mm=cfg.frame_coefficient*cfg.hull_wall,
                                   coefficient=cfg.frame_coefficient,added_volume_mm3=get('frame_added_volume',0))
+            if cfg.frame_layers != 2:
+                report['frames']['thickness_layers'] = cfg.frame_layers
         if cfg.stringers:
             report['stringers']=dict(spacing_mm=cfg.stringer_spacing, depth_mm=cfg.stringer_depth,
                 height_mm=cfg.stringer_height, up_in_section=cfg.stringer_up,

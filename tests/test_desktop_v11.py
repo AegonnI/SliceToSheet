@@ -246,10 +246,10 @@ class DesktopV11Tests(unittest.TestCase):
         from slicer import Settings
         self.assertFalse(self.window.fields['stringer_depth'].isEnabled())
         cfg = Settings(stringers=True, stringer_spacing=250, stringer_depth=40,
-                       stringer_height=20, stringer_up='X')
+                       stringer_height=21, stringer_up='-X', frame_layers=1)
         self.window.apply_settings(cfg)
         actual = self.window.cfg()
-        for key in ('stringers', 'stringer_spacing', 'stringer_depth', 'stringer_height', 'stringer_up'):
+        for key in ('stringers', 'stringer_spacing', 'stringer_depth', 'stringer_height', 'stringer_up', 'frame_layers'):
             self.assertEqual(getattr(actual, key), getattr(cfg, key))
         self.assertTrue(self.window.fields['stringer_depth'].isEnabled())
         self.window.stringers.setChecked(False)

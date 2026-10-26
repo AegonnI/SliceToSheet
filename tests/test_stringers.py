@@ -35,6 +35,21 @@ class StringerTests(unittest.TestCase):
             self.assertAlmostEqual(path.length, 330)
             self.assertAlmostEqual(path.coordinate(path.interval(150, 150))[0], 150)
 
+    def test_negative_up_starts_at_actual_keel_and_builds_connected_ribs(self):
+        paths = side_paths([[10, 10], [210, 10], [210, 240], [10, 240]], up=0, direction=-1)
+        for path in paths:
+            np.testing.assert_allclose(path[0], [210, 125])
+            self.assertEqual(path[-1, 0], 10)
+        mesh = shell()
+        cfg = self.cfg(stringer_up='-X', stringer_spacing=150)
+        cfg.validate()
+        builder = StringerBuilder(mesh, cfg, log=lambda _: None)
+        base = as_solid(mesh).trim_by_plane([0,0,1],20).trim_by_plane([0,0,-1],-40)
+        result = builder.augment(base,1)
+        self.assertGreater(result.volume(),base.volume())
+        self.assertEqual(len(result.decompose()),1)
+        self.assertLess((base-result).volume(),.001)
+
     def test_dimensions_both_sides_and_unchanged_outer_hull(self):
         mesh = shell()
         cfg = self.cfg()
@@ -85,7 +100,7 @@ class StringerTests(unittest.TestCase):
             source = root/'shell.stl'
             shell((120, 130, 100)).export(source)
             cfg = self.cfg(stringer_spacing=65, stringer_depth=10, stringer_height=8,
-                           frames=True, frame_interval=3, frame_coefficient=1.5,
+                           frames=True, frame_interval=3, frame_coefficient=1.5, frame_layers=1,
                            checkpoint_layers=2, export_format='both', export_assembly_stl=True)
             baseline = run(source, root/'baseline', cfg, log=lambda _: None)
             self.assertGreater(baseline['stringers']['added_volume_mm3'], 0)

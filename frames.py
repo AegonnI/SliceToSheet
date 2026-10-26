@@ -1,4 +1,4 @@
-"""Two-layer frames made by a metric inward offset of an enclosed cavity.
+"""Frames spanning a configurable number of layers inside an enclosed cavity.
 
 The original shell is only unioned with material inside its cavity. Sampling
 is local to one frame; its two longitudinal boundaries are exact cutting
@@ -11,7 +11,7 @@ import manifold3d
 
 def is_frame_layer(index, cfg):
     number = index + 1
-    return cfg.frames and number >= cfg.frame_interval and number % cfg.frame_interval < 2
+    return cfg.frames and number >= cfg.frame_interval and number % cfg.frame_interval < cfg.frame_layers
 
 
 class FrameBuilder:
@@ -59,8 +59,8 @@ class FrameBuilder:
                                  o3d.core.Tensor(np.asarray(cavity.faces, dtype=np.uint32)))
         self.pitch = min(2.0, self.amount / 8, cfg.thickness / 4)
         log('Шпангоуты: слои %d–%d, %d–%d…; стенка %.3g → %.3g мм внутрь.' %
-            (cfg.frame_interval, cfg.frame_interval+1, 2*cfg.frame_interval,
-             2*cfg.frame_interval+1, cfg.hull_wall, cfg.hull_wall+self.amount))
+            (cfg.frame_interval, cfg.frame_interval+cfg.frame_layers-1, 2*cfg.frame_interval,
+             2*cfg.frame_interval+cfg.frame_layers-1, cfg.hull_wall, cfg.hull_wall+self.amount))
 
     def distance(self, points):
         points = np.asarray(points, dtype=np.float32)
@@ -122,7 +122,7 @@ class FrameBuilder:
             inner.invert()
         if not inner.is_watertight or not inner.is_volume:
             raise ValueError('Не удалось построить замкнутую внутреннюю поверхность шпангоута.')
-        # Check the new surface in the actual two-layer band, excluding caps.
+        # Check the new surface in the actual frame band, excluding caps.
         selected = vertices[(vertices[:, 2] >= low) & (vertices[:, 2] <= high)]
         error = float(np.max(np.abs(self.distance(selected)-amount))) if len(selected) else 0.0
         if error > max(0.1, pitch):
@@ -144,8 +144,8 @@ class FrameBuilder:
         if start != self.cached_start:
             self.cancel()
             low = start*self.cfg.thickness
-            high = min((start+2)*self.cfg.thickness, self.length)
-            self.log('Шпангоут: слои %d–%d.' % (start+1, min(start+2, int(np.ceil(self.length/self.cfg.thickness)))))
+            high = min((start+self.cfg.frame_layers)*self.cfg.thickness, self.length)
+            self.log('Шпангоут: слои %d–%d.' % (start+1, min(start+self.cfg.frame_layers, int(np.ceil(self.length/self.cfg.thickness)))))
             cavity = self.cavity.trim_by_plane([0, 0, 1], low)
             if not cavity.is_empty():
                 cavity = cavity.trim_by_plane([0, 0, -1], -high)

@@ -110,7 +110,7 @@ class App(QtWidgets.QMainWindow):
     def __init__(self):
         application()
         super().__init__()
-        self.setWindowTitle('SliceToSheet 1.2 — модель → слои и листы A4')
+        self.setWindowTitle('SliceToSheet 1.2.1 — модель → слои и листы A4')
         self.resize(1440, 940)
         self.setMinimumSize(1040, 680)
         self.busy = False
@@ -231,7 +231,8 @@ class App(QtWidgets.QMainWindow):
         shell.form.addRow(self.frames)
         self.number(shell, 'frame_coefficient', 'Множитель стенки шпангоута', 2, 1.01, 20)
         self.number(shell, 'frame_interval', 'Интервал, слоёв', 25, 3, 10000, 0)
-        shell.form.addRow(self.note('Шпангоут занимает слои N и N+1. Множитель 2 удваивает стенку внутрь. Для готовой оболочки укажите её фактическую стенку.'))
+        self.number(shell, 'frame_layers', 'Толщина шпангоута, слоёв', 2, 1, 9999, 0)
+        shell.form.addRow(self.note('Шпангоут начинается со слоя N и занимает заданное число слоёв, меньше интервала. Множитель 2 удваивает стенку внутрь. Для готовой оболочки укажите её фактическую стенку.'))
 
         stringers = self.section('stringers', 'Продольные стрингеры', False)
         self.stringers = QtWidgets.QCheckBox('Добавлять стрингеры')
@@ -242,6 +243,8 @@ class App(QtWidgets.QMainWindow):
         self.stringer_up = ChoiceInput()
         self.stringer_up.addItem('Y сечения', 'Y')
         self.stringer_up.addItem('X сечения', 'X')
+        self.stringer_up.addItem('−X сечения', '-X')
+        self.stringer_up.addItem('−Y сечения', '-Y')
         stringers.form.addRow('Направление от киля вверх', self.stringer_up)
         stringers.form.addRow(self.note('Идут вдоль оси нарезки на обоих бортах. Шаг и высота измеряются по внутреннему контуру от киля; первый брусок — через один шаг. Стенка 10 мм + выступ 40 мм = 50 мм. Нужна замкнутая полость или создание оболочки.'))
         for key in ('stringer_spacing', 'stringer_depth', 'stringer_height'):
@@ -499,7 +502,7 @@ class App(QtWidgets.QMainWindow):
 
     def cfg(self):
         values = {key: widget.value() for key, widget in self.fields.items()}
-        for key in ('checkpoint_layers', 'frame_interval', 'simplify_faces'):
+        for key in ('checkpoint_layers', 'frame_interval', 'frame_layers', 'simplify_faces'):
             values[key] = int(values[key])
         if not self.simplify.isChecked():
             values['simplify_faces'] = 0
