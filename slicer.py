@@ -39,6 +39,7 @@ class Settings:
     hull_wall: float = 50.0
     frame_interval: int = 25
     frame_coefficient: float = 2.0
+    frame_layers: int = 2
     stringers: bool = False
     stringer_spacing: float = 250.0
     stringer_depth: float = 40.0
@@ -76,6 +77,8 @@ class Settings:
                 raise ValueError('Настройка %s должна быть включена или выключена.' % name)
         if type(self.frame_interval) is not int or self.frame_interval < 3:
             raise ValueError('Интервал шпангоутов должен быть целым числом >= 3.')
+        if type(self.frame_layers) is not int or not 1 <= self.frame_layers < self.frame_interval:
+            raise ValueError('Число слоёв шпангоута должно быть целым, от 1 до интервала шпангоутов минус 1.')
         if type(self.simplify_faces) is not int or self.simplify_faces < 0:
             raise ValueError('Число полигонов должно быть целым числом >= 0.')
         if self.simplify_faces and self.simplify_faces < 12:
@@ -101,8 +104,8 @@ class Settings:
             raise ValueError('Шаг, выступ и высота стрингера должны быть > 0.')
         if self.stringer_height >= self.stringer_spacing:
             raise ValueError('Высота стрингера должна быть меньше шага между стрингерами.')
-        if self.stringer_up not in ('X', 'Y'):
-            raise ValueError('Направление верха сечения: X или Y.')
+        if self.stringer_up not in ('X', 'Y', '-X', '-Y'):
+            raise ValueError('Направление верха сечения: X, Y, -X или -Y.')
         if min(self.clearance, self.wall, self.margin) < 0 or self.margin >= 90:
             raise ValueError('Зазор и стенка >= 0; поля от 0 до 90 мм (не включая 90).')
         if self.target_length < 0:
@@ -709,15 +712,16 @@ if __name__=='__main__':
     parser.add_argument('--export-format',choices=['svg','dxf','both'],default='svg')
     parser.add_argument('--no-parts-stl',action='store_true',help='Omit the individual STL folder')
     parser.add_argument('--no-assembly-stl',action='store_true',help='Omit assembly.stl')
-    parser.add_argument('--frames',action='store_true',help='Add two-layer frames inside a closed cavity')
+    parser.add_argument('--frames',action='store_true',help='Add frames inside a closed cavity')
     parser.add_argument('--stringers',action='store_true',help='Add longitudinal inward ribs on both sides')
     parser.add_argument('--stringer-spacing',type=float,default=250,help='Step along inner side from keel, mm')
     parser.add_argument('--stringer-depth',type=float,default=40,help='Additional inward rib depth, mm')
     parser.add_argument('--stringer-height',type=float,default=20,help='Rib width along the inner side, mm')
-    parser.add_argument('--stringer-up',choices=['X','Y'],default='Y',help='Up direction in the transverse assembly plane')
+    parser.add_argument('--stringer-up',choices=['X','Y','-X','-Y'],default='Y',help='Up direction in the transverse assembly plane')
     parser.add_argument('--hull-wall',type=float,default=50,help='Final hull wall thickness, mm')
     parser.add_argument('--frame-interval',type=int,default=25)
     parser.add_argument('--frame-coefficient',type=float,default=2)
+    parser.add_argument('--frame-layers',type=int,default=2)
     parser.add_argument('--make-shell',action='store_true',help='Create a cavity before slicing')
     parser.add_argument('--shell-pitch',type=float,default=3,help='Shell distance-field grid step, mm')
     parser.add_argument('--simplify-faces',type=int,default=0,help='Optional target triangle count; zero disables simplification')
@@ -731,7 +735,7 @@ if __name__=='__main__':
         auto_dowel_length=args.auto_dowel_length,min_hole_gap=args.min_hole_gap,
         export_format=args.export_format,export_parts_stl=not args.no_parts_stl,
         export_assembly_stl=not args.no_assembly_stl,frames=args.frames,hull_wall=args.hull_wall,
-        frame_interval=args.frame_interval,frame_coefficient=args.frame_coefficient,
+        frame_interval=args.frame_interval,frame_coefficient=args.frame_coefficient,frame_layers=args.frame_layers,
         stringers=args.stringers,stringer_spacing=args.stringer_spacing,stringer_depth=args.stringer_depth,
         stringer_height=args.stringer_height,stringer_up=args.stringer_up,
         make_shell=args.make_shell,shell_pitch=args.shell_pitch,

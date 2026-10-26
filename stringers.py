@@ -11,11 +11,12 @@ import manifold3d
 from scipy.spatial import cKDTree
 
 
-def side_paths(polygon, up=1):
+def side_paths(polygon, up=1, direction=1):
     """Walk from the middle of the keel to the first top edge on each side."""
-    polygon = np.asarray(polygon, dtype=float)
+    polygon = np.array(polygon, dtype=float, copy=True)
     if len(polygon) < 3:
         return []
+    polygon[:, up] *= direction
     bottom = polygon[:, up].min()
     top = polygon[:, up].max()
     if top-bottom < 1e-6:
@@ -36,6 +37,8 @@ def side_paths(polygon, up=1):
         path = points[:stop+1]
         path = path[np.r_[True, np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-7]]
         if len(path) >= 2:
+            path = path.copy()
+            path[:, up] *= direction
             result.append(path)
     return result
 
@@ -132,7 +135,8 @@ class StringerBuilder:
                               polygon[:, 1]*np.roll(polygon[:, 0], -1))
                 if area <= 0:
                     continue
-                for side, points in enumerate(side_paths(polygon, 'XY'.index(self.cfg.stringer_up))):
+                for side, points in enumerate(side_paths(polygon, 'XY'.index(self.cfg.stringer_up[-1]),
+                                                        -1 if self.cfg.stringer_up.startswith('-') else 1)):
                     paths[number, side] = ArcPath(points, self.pitch)
             self.cache[station] = paths
         return self.cache[station]
