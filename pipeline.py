@@ -212,6 +212,7 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
                 put('source',str(source.resolve()));put('cut_next',0);put('connect_next',0)
                 put('raw_volume',0);put('connections',[]);put('warnings',[]);put('occupied',[])
                 put('frame_added_volume',0)
+                put('stringer_added_volume',0)
             save_config(output/'settings.json',cfg)
         (output/'INCOMPLETE.txt').write_text('Расчёт не завершён. Продолжите его через программу. Не используйте комплект для изготовления.',encoding='utf-8')
         count=get('layer_count')
@@ -260,13 +261,14 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
                 volume=sum(p.mesh.volume for p in parts)
                 save_parts(parts);put('raw_volume',get('raw_volume')+volume);put('cut_next',k+1)
                 put('frame_added_volume',get('frame_added_volume',0)+statistics.get('frame_added_volume',0))
+                put('stringer_added_volume',get('stringer_added_volume',0)+statistics.get('stringer_added_volume',0))
                 if (k+1)%cfg.checkpoint_layers == 0 or k+1 == count: checkpoint()
                 elapsed=time.perf_counter()-last;last=time.perf_counter()
                 log('Нарезка %d/%d: %d деталей, %.2f с; рассчитано.'%(k+1,count,len(parts),elapsed))
                 notify('Нарезка',k+1,count)
                 del parts
             del mesh
-        raw=get('raw_volume');original=get('source_volume')+get('frame_added_volume',0)
+        raw=get('raw_volume');original=get('source_volume')+get('frame_added_volume',0)+get('stringer_added_volume',0)
         if abs(raw-original)>max(.01,original*1e-4): raise ValueError('Контроль объёма нарезки не пройден.')
         if db.execute('SELECT COUNT(*) FROM parts').fetchone()[0]==0: raise ValueError('После нарезки нет деталей.')
         steps=np.array(get('steps'));page=get('page')
@@ -407,6 +409,14 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
             report['frames']=dict(layer_numbers=[k+1 for k in range(count) if is_frame_layer(k,cfg)],
                                   original_wall_mm=cfg.hull_wall,frame_wall_mm=cfg.frame_coefficient*cfg.hull_wall,
                                   coefficient=cfg.frame_coefficient,added_volume_mm3=get('frame_added_volume',0))
+        if cfg.stringers:
+            report['stringers']=dict(spacing_mm=cfg.stringer_spacing, depth_mm=cfg.stringer_depth,
+                height_mm=cfg.stringer_height, up_in_section=cfg.stringer_up,
+                direction='slicing_axis', spacing_measure='inner_side_arc_length_from_keel',
+                grid_pitch_mm=min(2.,cfg.stringer_height/8,cfg.stringer_depth/8,cfg.thickness/4),
+                added_volume_mm3=get('stringer_added_volume',0))
+            if get('stringer_added_volume',0) <= .01:
+                final_notes.append('Стрингеры: при выбранном шаге подходящих участков не найдено. Уменьшите шаг и проверьте направление верха сечения.')
         if cfg.unique_keys:
             report['key_validation']=dict(scope='complete_interface_triplets',keys=registry.count,
                 center_tolerance_mm=cfg.key_tolerance,distance_tolerance_mm=2*cfg.key_tolerance,
@@ -426,6 +436,8 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
             ('Шпангоуты: стенка %.3g → %.3g мм внутрь; слои: %s.\nДобавленный объём: %.3f мм³.\n\n' %
              (cfg.hull_wall,cfg.frame_coefficient*cfg.hull_wall,', '.join(map(str,report['frames']['layer_numbers'])),
               get('frame_added_volume',0)) if cfg.frames else '')+
+            ('Стрингеры: вдоль оси нарезки; шаг по борту %.3g мм, выступ внутрь %.3g мм, высота %.3g мм.\nДобавленный объём: %.3f мм³.\n\n' %
+             (cfg.stringer_spacing,cfg.stringer_depth,cfg.stringer_height,get('stringer_added_volume',0)) if cfg.stringers else '')+
             metrics_text+
             '\n'.join(final_notes or ['Все соединения размещены.'])+
             '\n\nSVG/DXF — среднее сечение, а не контур всей объёмной детали. Масштаб 1:1; печатать 100%.\n'

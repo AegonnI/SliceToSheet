@@ -39,6 +39,11 @@ class Settings:
     hull_wall: float = 50.0
     frame_interval: int = 25
     frame_coefficient: float = 2.0
+    stringers: bool = False
+    stringer_spacing: float = 250.0
+    stringer_depth: float = 40.0
+    stringer_height: float = 20.0
+    stringer_up: str = 'Y'  # upward direction in the transverse assembly plane
     make_shell: bool = False
     shell_pitch: float = 3.0
     simplify_faces: int = 0  # zero keeps the input mesh unchanged
@@ -65,7 +70,7 @@ class Settings:
             raise ValueError('Режим четырёх отверстий несовместим с тройками ключей.')
         if type(self.checkpoint_layers) is not int or self.checkpoint_layers < 1:
             raise ValueError('Интервал сохранения должен быть целым числом >= 1.')
-        for name in ('auto_orientation', 'auto_dowel_length', 'frames', 'make_shell',
+        for name in ('auto_orientation', 'auto_dowel_length', 'frames', 'stringers', 'make_shell',
                      'export_parts_stl', 'export_assembly_stl'):
             if type(getattr(self, name)) is not bool:
                 raise ValueError('Настройка %s должна быть включена или выключена.' % name)
@@ -80,7 +85,8 @@ class Settings:
         numbers = [self.thickness, self.diameter, self.clearance, self.length,
                    self.wall, self.margin, self.scale, self.pitch, self.target_length,
                    self.key_tolerance, self.svg_padding, self.min_hole_gap, self.hull_wall,
-                   self.frame_coefficient, self.shell_pitch, self.simplify_tolerance]
+                   self.frame_coefficient, self.shell_pitch, self.simplify_tolerance,
+                   self.stringer_spacing, self.stringer_depth, self.stringer_height]
         if not all(math.isfinite(x) for x in numbers):
             raise ValueError('Параметры должны быть конечными числами.')
         if min(self.thickness, self.diameter, self.length, self.scale, self.pitch) <= 0:
@@ -91,6 +97,12 @@ class Settings:
             raise ValueError('Толщина корпуса, шаг оболочки и допуск упрощения должны быть > 0.')
         if self.frame_coefficient < 1:
             raise ValueError('Коэффициент ширины шпангоута должен быть >= 1.')
+        if min(self.stringer_spacing, self.stringer_depth, self.stringer_height) <= 0:
+            raise ValueError('Шаг, выступ и высота стрингера должны быть > 0.')
+        if self.stringer_height >= self.stringer_spacing:
+            raise ValueError('Высота стрингера должна быть меньше шага между стрингерами.')
+        if self.stringer_up not in ('X', 'Y'):
+            raise ValueError('Направление верха сечения: X или Y.')
         if min(self.clearance, self.wall, self.margin) < 0 or self.margin >= 90:
             raise ValueError('Зазор и стенка >= 0; поля от 0 до 90 мм (не включая 90).')
         if self.target_length < 0:
@@ -340,6 +352,10 @@ def iter_cut(mesh, cfg, log, layer_indices=None, cancel=lambda: None, statistics
         raise ValueError('Не удалось преобразовать модель в объём для нарезки.')
     mesh._cache.clear()
     frame_builder = None
+    stringer_builder = None
+    if cfg.stringers:
+        from stringers import StringerBuilder
+        stringer_builder = StringerBuilder(mesh, cfg, cancel, frame_log or log)
     if cfg.frames and counts[2] >= cfg.frame_interval:
         from frames import FrameBuilder
         frame_builder = FrameBuilder(mesh, cfg, cancel, frame_log or log)
@@ -358,6 +374,13 @@ def iter_cut(mesh, cfg, log, layer_indices=None, cancel=lambda: None, statistics
                 [0,0,-1],-min((block_number+1)*16*steps[2],mesh.bounds[1,2]))
         slab = block.trim_by_plane([0, 0, 1], k*steps[2]).trim_by_plane(
             [0, 0, -1], -min((k+1)*steps[2], mesh.bounds[1, 2]))
+        stringer_added = 0.0
+        if stringer_builder is not None:
+            before = slab.volume()
+            slab = stringer_builder.augment(slab, k)
+            stringer_added = slab.volume()-before
+            if stringer_added < -max(.01, abs(before)*1e-5):
+                raise ValueError('Стрингер удалил материал исходного корпуса.')
         added_volume = 0.0
         if frame_builder is not None:
             before = slab.volume()
@@ -367,6 +390,7 @@ def iter_cut(mesh, cfg, log, layer_indices=None, cancel=lambda: None, statistics
                 raise ValueError('Шпангоут удалил материал исходного корпуса.')
         if statistics is not None:
             statistics['frame_added_volume'] = max(0.0, added_volume)
+            statistics['stringer_added_volume'] = max(0.0, stringer_added)
         if slab.is_empty():
             yield k, parts
             continue
@@ -686,6 +710,11 @@ if __name__=='__main__':
     parser.add_argument('--no-parts-stl',action='store_true',help='Omit the individual STL folder')
     parser.add_argument('--no-assembly-stl',action='store_true',help='Omit assembly.stl')
     parser.add_argument('--frames',action='store_true',help='Add two-layer frames inside a closed cavity')
+    parser.add_argument('--stringers',action='store_true',help='Add longitudinal inward ribs on both sides')
+    parser.add_argument('--stringer-spacing',type=float,default=250,help='Step along inner side from keel, mm')
+    parser.add_argument('--stringer-depth',type=float,default=40,help='Additional inward rib depth, mm')
+    parser.add_argument('--stringer-height',type=float,default=20,help='Rib width along the inner side, mm')
+    parser.add_argument('--stringer-up',choices=['X','Y'],default='Y',help='Up direction in the transverse assembly plane')
     parser.add_argument('--hull-wall',type=float,default=50,help='Final hull wall thickness, mm')
     parser.add_argument('--frame-interval',type=int,default=25)
     parser.add_argument('--frame-coefficient',type=float,default=2)
@@ -703,5 +732,7 @@ if __name__=='__main__':
         export_format=args.export_format,export_parts_stl=not args.no_parts_stl,
         export_assembly_stl=not args.no_assembly_stl,frames=args.frames,hull_wall=args.hull_wall,
         frame_interval=args.frame_interval,frame_coefficient=args.frame_coefficient,
+        stringers=args.stringers,stringer_spacing=args.stringer_spacing,stringer_depth=args.stringer_depth,
+        stringer_height=args.stringer_height,stringer_up=args.stringer_up,
         make_shell=args.make_shell,shell_pitch=args.shell_pitch,
         simplify_faces=args.simplify_faces,simplify_tolerance=args.simplify_tolerance),resume=args.resume)
