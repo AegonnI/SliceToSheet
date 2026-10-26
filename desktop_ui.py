@@ -8,6 +8,7 @@ import sys
 import threading
 import traceback
 from dataclasses import asdict
+from contextlib import closing
 from types import SimpleNamespace
 
 os.environ.setdefault('QT_API', 'pyside6')
@@ -109,7 +110,7 @@ class App(QtWidgets.QMainWindow):
     def __init__(self):
         application()
         super().__init__()
-        self.setWindowTitle('SliceToSheet 1.1 — модель → слои и листы A4')
+        self.setWindowTitle('SliceToSheet 1.2 — модель → слои и листы A4')
         self.resize(1440, 940)
         self.setMinimumSize(1040, 680)
         self.busy = False
@@ -231,6 +232,23 @@ class App(QtWidgets.QMainWindow):
         self.number(shell, 'frame_coefficient', 'Множитель стенки шпангоута', 2, 1.01, 20)
         self.number(shell, 'frame_interval', 'Интервал, слоёв', 25, 3, 10000, 0)
         shell.form.addRow(self.note('Шпангоут занимает слои N и N+1. Множитель 2 удваивает стенку внутрь. Для готовой оболочки укажите её фактическую стенку.'))
+
+        stringers = self.section('stringers', 'Продольные стрингеры', False)
+        self.stringers = QtWidgets.QCheckBox('Добавлять стрингеры')
+        stringers.form.addRow(self.stringers)
+        self.number(stringers, 'stringer_spacing', 'Шаг от киля к верху, мм', 250, .1, 100000)
+        self.number(stringers, 'stringer_depth', 'Выступ внутрь от стенки, мм', 40, .1, 10000)
+        self.number(stringers, 'stringer_height', 'Высота бруска по борту, мм', 20, .1, 10000)
+        self.stringer_up = ChoiceInput()
+        self.stringer_up.addItem('Y сечения', 'Y')
+        self.stringer_up.addItem('X сечения', 'X')
+        stringers.form.addRow('Направление от киля вверх', self.stringer_up)
+        stringers.form.addRow(self.note('Идут вдоль оси нарезки на обоих бортах. Шаг и высота измеряются по внутреннему контуру от киля; первый брусок — через один шаг. Стенка 10 мм + выступ 40 мм = 50 мм. Нужна замкнутая полость или создание оболочки.'))
+        for key in ('stringer_spacing', 'stringer_depth', 'stringer_height'):
+            self.fields[key].setEnabled(False)
+            self.stringers.toggled.connect(self.fields[key].setEnabled)
+        self.stringer_up.setEnabled(False)
+        self.stringers.toggled.connect(self.stringer_up.setEnabled)
 
         export = self.section('export', 'Экспорт и отчёты')
         self.export_format = ChoiceInput()
@@ -490,6 +508,7 @@ class App(QtWidgets.QMainWindow):
                        length=2*values['thickness'], auto_dowel_length=True, auto_orientation=orientation == 'auto',
                        landscape=orientation == 'landscape', staggered=True, four_holes=True, unique_keys=False,
                        side_connections=False, reverse=False, frames=self.frames.isChecked(), make_shell=self.make_shell.isChecked(),
+                       stringers=self.stringers.isChecked(), stringer_up=self.stringer_up.currentData(),
                        export_format=self.export_format.currentData(), export_parts_stl=self.export_parts.isChecked(),
                        export_assembly_stl=self.export_assembly.isChecked())
         cfg.validate()
@@ -503,6 +522,8 @@ class App(QtWidgets.QMainWindow):
         self.axis.setCurrentText(cfg.axis)
         self.orientation.setCurrentIndex(0 if cfg.auto_orientation else (2 if cfg.landscape else 1))
         self.frames.setChecked(cfg.frames)
+        self.stringers.setChecked(cfg.stringers)
+        self.stringer_up.setCurrentIndex(max(0, self.stringer_up.findData(cfg.stringer_up)))
         self.make_shell.setChecked(cfg.make_shell)
         self.simplify.setChecked(cfg.simplify_faces > 0)
         self.export_format.setCurrentIndex(max(0, self.export_format.findData(cfg.export_format)))
@@ -574,7 +595,7 @@ class App(QtWidgets.QMainWindow):
             db_path = Path(folder)/'progress.sqlite'
             if not db_path.is_file():
                 raise ValueError('В выбранной папке нет progress.sqlite.')
-            with sqlite3.connect(str(db_path)) as db:
+            with closing(sqlite3.connect(str(db_path))) as db:
                 values = {k: json.loads(v) for k, v in db.execute('SELECT key,value FROM meta')}
             cfg = Settings.from_saved(values['settings'])
             cfg.validate()

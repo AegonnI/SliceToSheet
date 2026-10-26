@@ -9,6 +9,7 @@ import unittest
 import json
 import sqlite3
 from dataclasses import asdict
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -171,11 +172,12 @@ class DesktopV11Tests(unittest.TestCase):
         saved = Settings(scale=2,axis='Y')
         folder = self.root/'resume-second-source'
         folder.mkdir(exist_ok=True)
-        with sqlite3.connect(str(folder/'progress.sqlite')) as db:
-            db.execute('CREATE TABLE meta (key TEXT PRIMARY KEY,value TEXT)')
-            db.executemany('INSERT INTO meta VALUES (?,?)',
-                           [('settings',json.dumps(asdict(saved))),
-                            ('source',json.dumps(str(self.second_source)))])
+        with closing(sqlite3.connect(str(folder/'progress.sqlite'))) as db:
+            with db:
+                db.execute('CREATE TABLE meta (key TEXT PRIMARY KEY,value TEXT)')
+                db.executemany('INSERT INTO meta VALUES (?,?)',
+                               [('settings',json.dumps(asdict(saved))),
+                                ('source',json.dumps(str(self.second_source)))])
         def launched(source, output, cfg, resume=False):
             self.window.busy = True
             self.window.current_output = output
@@ -227,7 +229,7 @@ class DesktopV11Tests(unittest.TestCase):
                 self.assertGreater(scroll.value(), 0)
 
     def test_optional_sections_collapse_and_theme_can_switch_both_ways(self):
-        for name in ('shell','advanced','simplify'):
+        for name in ('shell','stringers','advanced','simplify'):
             self.assertTrue(self.window.sections[name].body.isHidden())
             self.window.sections[name].toggle.click()
             self.assertFalse(self.window.sections[name].body.isHidden())
@@ -240,12 +242,27 @@ class DesktopV11Tests(unittest.TestCase):
         self.window.theme_button.click()
         self.assertTrue(self.window.dark_theme)
 
+    def test_stringer_settings_toggle_and_roundtrip(self):
+        from slicer import Settings
+        self.assertFalse(self.window.fields['stringer_depth'].isEnabled())
+        cfg = Settings(stringers=True, stringer_spacing=250, stringer_depth=40,
+                       stringer_height=20, stringer_up='X')
+        self.window.apply_settings(cfg)
+        actual = self.window.cfg()
+        for key in ('stringers', 'stringer_spacing', 'stringer_depth', 'stringer_height', 'stringer_up'):
+            self.assertEqual(getattr(actual, key), getattr(cfg, key))
+        self.assertTrue(self.window.fields['stringer_depth'].isEnabled())
+        self.window.stringers.setChecked(False)
+        self.assertFalse(self.window.fields['stringer_depth'].isEnabled())
+
     def test_real_window_screenshots_include_vtk_model_and_slicing_plane(self):
         self.load()
         self.window.preview_button.click()
         self.application.processEvents()
         self.assertIn('slicing_base', self.window.plotter.actors)
         self.assertIn('slicing_direction', self.window.plotter.actors)
+        self.window.sections['stringers'].toggle.setChecked(True)
+        self.window.stringers.setChecked(True)
         destination = Path(__file__).resolve().parents[1]/'build'/'qa'
         destination.mkdir(parents=True, exist_ok=True)
         for dark, name in ((True,'desktop-dark.png'), (False,'desktop-light.png')):

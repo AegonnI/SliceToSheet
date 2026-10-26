@@ -22,6 +22,7 @@
 !/model_preview.py
 !/sections.py
 !/frames.py
+!/stringers.py
 !/hollow.py
 !/START_WINDOWS.bat
 !/CHANGELOG.md
