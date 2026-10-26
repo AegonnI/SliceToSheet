@@ -52,6 +52,8 @@ class Settings:
     export_format: str = 'svg'
     export_parts_stl: bool = True
     export_assembly_stl: bool = True
+    nest_sheets: bool = True
+    sheet_gap: float = 7.0
 
     @classmethod
     def from_saved(cls, values):
@@ -72,7 +74,7 @@ class Settings:
         if type(self.checkpoint_layers) is not int or self.checkpoint_layers < 1:
             raise ValueError('Интервал сохранения должен быть целым числом >= 1.')
         for name in ('auto_orientation', 'auto_dowel_length', 'frames', 'stringers', 'make_shell',
-                     'export_parts_stl', 'export_assembly_stl'):
+                     'export_parts_stl', 'export_assembly_stl', 'nest_sheets'):
             if type(getattr(self, name)) is not bool:
                 raise ValueError('Настройка %s должна быть включена или выключена.' % name)
         if type(self.frame_interval) is not int or self.frame_interval < 3:
@@ -89,13 +91,15 @@ class Settings:
                    self.wall, self.margin, self.scale, self.pitch, self.target_length,
                    self.key_tolerance, self.svg_padding, self.min_hole_gap, self.hull_wall,
                    self.frame_coefficient, self.shell_pitch, self.simplify_tolerance,
-                   self.stringer_spacing, self.stringer_depth, self.stringer_height]
+                   self.stringer_spacing, self.stringer_depth, self.stringer_height, self.sheet_gap]
         if not all(math.isfinite(x) for x in numbers):
             raise ValueError('Параметры должны быть конечными числами.')
         if min(self.thickness, self.diameter, self.length, self.scale, self.pitch) <= 0:
             raise ValueError('Толщина, диаметр, длина, масштаб и шаг должны быть > 0.')
         if self.min_hole_gap < 0:
             raise ValueError('Минимальная перемычка между отверстиями должна быть >= 0.')
+        if self.sheet_gap<0:
+            raise ValueError('Расстояние между деталями на листе должно быть >= 0.')
         if min(self.hull_wall, self.shell_pitch, self.simplify_tolerance) <= 0:
             raise ValueError('Толщина корпуса, шаг оболочки и допуск упрощения должны быть > 0.')
         if self.frame_coefficient < 1:
@@ -659,25 +663,11 @@ def place_connectors(parts, steps, cfg, log, owner_layer=None, occupied=None, ca
 
 
 def export_svg(part, destination, page, cfg, records=()):
-    # A middle section is a dimensioned drilling/section reference, not a solid projection.
-    origin = part.mesh.bounds[0].copy()
-    z = float(part.mesh.bounds[:,2].mean())
-    section = part.mesh.section(plane_origin=[0,0,z], plane_normal=[0,0,1])
-    padding = cfg.svg_padding
-    document = (page[0] + 2*padding, page[1] + 2*padding)
-    lines = ['<svg xmlns="http://www.w3.org/2000/svg" width="%smm" height="%smm" viewBox="0 0 %s %s">' % (*document,*document),
-             '<rect width="100%" height="100%" fill="white"/>',
-             '<g transform="translate(%s %s)">' % (padding,padding),
-             '<g fill="none" stroke="black" stroke-width="0.2">']
-    if section is not None:
-        for contour in section.discrete:
-            xy=contour[:,:2]-origin[:2]+cfg.margin
-            points=' '.join('%.4f,%.4f' % (x,page[1]-y) for x,y in xy)
-            lines.append('<polyline points="%s"/>' % points)
+    from sections import section_contours, _export_svg
     from marking import svg_labels
+    z, contours = section_contours(part)
     labels, notes = svg_labels(part, page, cfg, records, z)
-    lines += ['</g>'] + labels + ['<text x="3" y="4" font-size="2.5">%s | MID SECTION z=%.3f mm | PRINT 100%%</text>' % (part.id,z), '</g>', '</svg>']
-    destination.write_text('\n'.join(lines), encoding='utf-8')
+    _export_svg(part, destination, page, cfg, contours, labels)
     return notes
 
 
@@ -693,7 +683,7 @@ if __name__=='__main__':
         sys.stdout.reconfigure(errors='replace')
     parser=argparse.ArgumentParser(description='STL / STEP / STP → 20 mm layers / A4 / dowels')
     parser.add_argument('stl', metavar='model', help='Input STL, STEP or STP file');parser.add_argument('output')
-    parser.add_argument('--diameter',type=float,choices=[8,10],default=8)
+    parser.add_argument('--diameter',type=float,default=8,help='Nominal dowel diameter in mm')
     parser.add_argument('--scale',type=float,default=1)
     parser.add_argument('--axis',choices=['X','Y','Z'],default='Z')
     parser.add_argument('--target-length',type=float,default=0,help='Length along source axis in mm, preserving proportions')
@@ -712,6 +702,8 @@ if __name__=='__main__':
     parser.add_argument('--export-format',choices=['svg','dxf','both'],default='svg')
     parser.add_argument('--no-parts-stl',action='store_true',help='Omit the individual STL folder')
     parser.add_argument('--no-assembly-stl',action='store_true',help='Omit assembly.stl')
+    parser.add_argument('--no-nesting',action='store_true',help='Omit the separate compact A4 sheet layout')
+    parser.add_argument('--sheet-gap',type=float,default=7,help='Minimum contour gap on nested sheets, mm')
     parser.add_argument('--frames',action='store_true',help='Add frames inside a closed cavity')
     parser.add_argument('--stringers',action='store_true',help='Add longitudinal inward ribs on both sides')
     parser.add_argument('--stringer-spacing',type=float,default=250,help='Step along inner side from keel, mm')
@@ -734,7 +726,8 @@ if __name__=='__main__':
         checkpoint_layers=args.checkpoint_layers,auto_orientation=args.auto_orientation,
         auto_dowel_length=args.auto_dowel_length,min_hole_gap=args.min_hole_gap,
         export_format=args.export_format,export_parts_stl=not args.no_parts_stl,
-        export_assembly_stl=not args.no_assembly_stl,frames=args.frames,hull_wall=args.hull_wall,
+        export_assembly_stl=not args.no_assembly_stl,nest_sheets=not args.no_nesting,sheet_gap=args.sheet_gap,
+        frames=args.frames,hull_wall=args.hull_wall,
         frame_interval=args.frame_interval,frame_coefficient=args.frame_coefficient,frame_layers=args.frame_layers,
         stringers=args.stringers,stringer_spacing=args.stringer_spacing,stringer_depth=args.stringer_depth,
         stringer_height=args.stringer_height,stringer_up=args.stringer_up,

@@ -1,6 +1,6 @@
 # Third-party software
 
-SliceToSheet 1.1.0 uses Python and third-party libraries for its desktop UI,
+SliceToSheet 1.3.0 uses Python and third-party libraries for its desktop UI,
 3D rendering, solid geometry, CAD import, numerical operations and exports.
 Each component and its dependencies retain their own copyright and license.
 The versions selected for this release are pinned in `requirements.txt` and
@@ -23,6 +23,7 @@ when redistributing the portable folder.
 | Trimesh | [Source](https://github.com/mikedh/trimesh) |
 | NetworkX | [Source](https://github.com/networkx/networkx) |
 | Manifold | [Source](https://github.com/elalish/manifold) |
+| Shapely and GEOS | [Shapely license and source](https://github.com/shapely/shapely), [GEOS license](https://libgeos.org/usage/license/) |
 | fast-simplification | [Source](https://github.com/pyvista/fast-simplification) |
 | ezdxf | [MIT license and source](https://github.com/mozman/ezdxf/blob/master/LICENSE) |
 | Open3D | [Source](https://github.com/isl-org/Open3D) |

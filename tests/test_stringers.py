@@ -116,8 +116,8 @@ class StringerTests(unittest.TestCase):
             resumed = run(source, root/'paused', resume=True, log=lambda _: None)
             for key in ('stringers', 'frames', 'metrics', 'volume_before_holes', 'volume_after_holes'):
                 self.assertEqual(resumed[key], baseline[key])
-            self.assertTrue(list((root/'paused'/'sections_a4').glob('*.svg')))
-            self.assertTrue(list((root/'paused'/'sections_a4').glob('*.dxf')))
+            self.assertTrue(list((root/'paused'/'sections_a4').rglob('*.svg')))
+            self.assertTrue(list((root/'paused'/'sections_a4').rglob('*.dxf')))
             assembled = trimesh.load(root/'paused'/'assembly.stl', force='mesh', process=False)
             self.assertAlmostEqual(assembled.volume, resumed['volume_after_holes'], delta=.1)
 

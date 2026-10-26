@@ -4,12 +4,12 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 
 root = Path(SPECPATH)
 data = collect_data_files('trimesh')
-binaries = collect_dynamic_libs('OCP') + [item for item in collect_dynamic_libs('open3d')
+binaries = collect_dynamic_libs('OCP') + collect_dynamic_libs('shapely') + [item for item in collect_dynamic_libs('open3d')
                                        if 'torch_ops' not in item[0] and 'tf_ops' not in item[0]]
 data += collect_data_files('open3d')
 for distribution in ('numpy', 'trimesh', 'manifold3d', 'matplotlib', 'networkx',
                      'scipy', 'fast-simplification', 'cadquery-ocp', 'PySide6',
-                     'pyvista', 'pyvistaqt', 'vtk', 'ezdxf', 'open3d', 'scikit-image', 'rtree'):
+                     'pyvista', 'pyvistaqt', 'vtk', 'ezdxf', 'open3d', 'scikit-image', 'rtree', 'shapely'):
     data += copy_metadata(distribution)
 
 a = Analysis(

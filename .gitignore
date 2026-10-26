@@ -23,6 +23,8 @@
 !/sections.py
 !/frames.py
 !/stringers.py
+!/nesting.py
+!/inspection.py
 !/hollow.py
 !/START_WINDOWS.bat
 !/CHANGELOG.md

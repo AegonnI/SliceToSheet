@@ -29,7 +29,7 @@ class ExportV11Tests(unittest.TestCase):
                     self.assertEqual((out/'assembly.stl').exists(), assembly)
                     for extension in ('svg', 'dxf'):
                         expected = len(report['parts']) if fmt in (extension, 'both') else 0
-                        self.assertEqual(len(list((out/'sections_a4').glob('*.'+extension))), expected)
+                        self.assertEqual(len(list((out/'sections_a4').rglob('*.'+extension))), expected)
                     meshes = load_layer_meshes(out, 1)
                     self.assertEqual(len(meshes), len(report['parts']))
                     self.assertAlmostEqual(sum(m.volume for m in meshes), report['volume_after_holes'])
@@ -53,7 +53,7 @@ class ExportV11Tests(unittest.TestCase):
                 self.assertAlmostEqual(totals[key], expected, places=5)
             self.assertEqual(totals['inner_contours'], 1)
             self.assertEqual(report['metrics']['layers'][0]['net_area_mm2'], 5600)
-            dxf = ezdxf.readfile(next((root/'result'/'sections_a4').glob('*.dxf')))
+            dxf = ezdxf.readfile(next((root/'result'/'sections_a4').rglob('*.dxf')))
             self.assertEqual(dxf.units, 4)
             self.assertFalse(dxf.audit().has_errors)
             contours = [e for e in dxf.modelspace() if e.dxf.layer == 'CONTOURS']
@@ -78,7 +78,7 @@ class ExportV11Tests(unittest.TestCase):
             trimesh.creation.box([80, 60, 40]).export(source)
             cfg = Settings(export_format='both', export_parts_stl=False, export_assembly_stl=False)
             expected = run(source, root/'result', cfg, log=lambda _: None)
-            target = next((root/'result'/'sections_a4').glob('*.dxf'))
+            target = next((root/'result'/'sections_a4').rglob('*.dxf'))
             target.unlink()
             actual = run(source, root/'result', resume=True, log=lambda _: None)
             self.assertTrue(target.is_file())

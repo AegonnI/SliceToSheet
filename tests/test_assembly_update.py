@@ -47,10 +47,12 @@ class AssemblyUpdateTests(unittest.TestCase):
                 counts=Counter((c[key],key) for c in r['connections'] if c['axis']=='Z' for key in ('part_a','part_b'))
                 self.assertTrue(all(n<=2 for n in counts.values()))
                 for p in r['parts']:
-                    svg=(out/'sections_a4'/(p['id']+'.svg')).read_text(encoding='utf-8')
+                    from sections import section_path
+                    svg=section_path(out/'sections_a4',p['id'],'svg').read_text(encoding='utf-8')
                     self.assertIn(p['marking'],svg)
                     for link in p['links']:
-                        text=link['direction']+' '+link['address']+' '+link['connection']
+                        from marking import link_text
+                        text=link_text(link)
                         self.assertTrue(text in svg or any(text in note for note in p['marking_warnings']))
 
     def test_checkpoint_batches_and_soft_pause(self):

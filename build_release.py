@@ -15,6 +15,7 @@ def main():
     if sys.platform != 'win32':
         raise SystemExit('Build the Windows release on Windows x64.')
     version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+    dist_root=ROOT/'dist'/('release-'+version)
     # Do not collect unrelated DLLs from the host's document/media tools.
     # In particular their ICU can shadow the Windows ICU used by Qt.
     environment = os.environ.copy()
@@ -23,9 +24,9 @@ def main():
     environment['PATH'] = os.pathsep.join([str(Path(sys.executable).parent),
                                          str(Path(os.environ['SystemRoot']) / 'System32'),
                                          os.environ['SystemRoot']])
-    subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm', str(ROOT / 'SliceToSheet.spec')],
+    subprocess.run([sys.executable, '-m', 'PyInstaller', '--clean', '--noconfirm', '--distpath', str(dist_root), str(ROOT / 'SliceToSheet.spec')],
                    cwd=ROOT, env=environment, check=True)
-    folder = ROOT / 'dist' / 'SliceToSheet'
+    folder = dist_root / 'SliceToSheet'
     for name in ('README.md', 'QUICKSTART_RU.txt', 'VERSION', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md'):
         shutil.copy2(ROOT / name, folder / name)
     shutil.copytree(ROOT / 'docs', folder / 'docs', dirs_exist_ok=True)
@@ -55,7 +56,7 @@ def main():
     releases = ROOT / 'releases'
     releases.mkdir(exist_ok=True)
     archive = Path(shutil.make_archive(str(releases / ('SliceToSheet-%s-Windows-x64' % version)),
-                                      'zip', root_dir=ROOT / 'dist', base_dir='SliceToSheet'))
+                                      'zip', root_dir=dist_root, base_dir='SliceToSheet'))
     with archive.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     archive.with_suffix('.zip.sha256').write_text(digest + '  ' + archive.name + '\n', encoding='ascii')

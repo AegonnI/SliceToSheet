@@ -108,7 +108,7 @@ class StepTests(unittest.TestCase):
         self.assertAlmostEqual(assembly.volume, report['volume_after_holes'], places=2)
         for part in (output / 'stl').glob('*.stl'):
             self.assertTrue(trimesh.load(part, force='mesh').is_volume)
-        self.assertTrue(list((output / 'sections_a4').glob('*.svg')))
+        self.assertTrue(list((output / 'sections_a4').rglob('*.svg')))
 
 
 if __name__ == '__main__':
