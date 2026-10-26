@@ -50,10 +50,15 @@ def check_installation(destination):
             report = run(source, output, Settings(export_format='both'), log=lambda _: None)
             if report['layer_count'] != 2 or len(report['parts']) != 2:
                 raise RuntimeError('Unexpected slicing result')
-            if not list((output / 'sections_a4').glob('*.svg')):
+            if not list((output / 'sections_a4').rglob('*.svg')):
                 raise RuntimeError('SVG export missing')
-            if not list((output / 'sections_a4').glob('*.dxf')):
+            if not list((output / 'sections_a4').rglob('*.dxf')):
                 raise RuntimeError('DXF export missing')
+            if not (output/'Inspection'/'index.html').is_file() or not (output/'print_addresses.csv').is_file():
+                raise RuntimeError('Inspection or compact numbering index missing')
+            if not report['sheet_nesting']['sheets'] or not list((output/'Sheets'/'DXF').glob('*.dxf')):
+                raise RuntimeError('True-contour nesting or its native dependencies failed')
+            result['checks'].append('Compact numbering, inspection index and true-contour A4 nesting')
             if not (output / 'metrics.csv').is_file() or report['metrics']['totals']['net_area_mm2'] <= 0:
                 raise RuntimeError('Manufacturing measurements missing')
             assembly = trimesh.load(output / 'assembly.stl', force='mesh', process=False)

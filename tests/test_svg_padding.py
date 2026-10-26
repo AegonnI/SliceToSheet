@@ -33,7 +33,7 @@ class SvgPaddingTests(unittest.TestCase):
                     self.assertEqual(list(map(float, root.attrib['viewBox'].split())), [0, 0, *document])
                     wrapper = root.find('s:g', NS)
                     self.assertEqual(wrapper.attrib, {'transform': 'translate(%s %s)' % (padding, padding)})
-                    self.assertGreater(len(wrapper.findall('s:text', NS)), 1)
+                    self.assertGreaterEqual(len(wrapper.findall('s:text', NS)), 1)
                     for line in wrapper.findall('s:g/s:polyline', NS):
                         xy = np.array([list(map(float, p.split(','))) for p in line.attrib['points'].split()])
                         self.assertTrue(np.allclose(xy[0], xy[-1]))

@@ -15,6 +15,87 @@ import numpy as np
 METRIC_FIELDS = ('net_area_mm2', 'outer_cut_mm', 'inner_cut_mm', 'open_cut_mm',
                  'total_cut_mm', 'surface_area_mm2', 'outer_contours',
                  'inner_contours', 'open_contours')
+EXPORT_REVISION = 3
+
+
+def even_odd(polygons):
+    """Binary XOR avoids Shapely's deprecated symmetric_difference_all path."""
+    import shapely
+    result=shapely.Polygon()
+    for polygon in polygons:result=result.symmetric_difference(polygon)
+    return result
+
+
+def section_path(folder, part_id, extension, review=False):
+    base=Path(folder).parent/'Inspection'/'Rejected' if review else Path(folder)
+    return base/extension.upper()/part_id.split('_')[0]/(part_id+'.'+extension)
+
+
+def section_shape(part):
+    """Regularize sub-0.01 mm numerical slits, recording every omission."""
+    from slicer import as_solid
+    import manifold3d
+    import shapely
+    key='fabrication_section_v2'
+    if key in part.mesh._cache:return part.mesh._cache[key]
+    solid=as_solid(part.mesh)
+    if solid.status()!=manifold3d.Error.NoError:
+        raise ValueError(part.id+': некорректный объём для экспорта сечения.')
+    z=float(part.mesh.bounds[:,2].mean())
+    raw=solid.slice(z)
+    kept=[];removed=[];zero_area_paths=0.;repaired_rings=0
+    def micro_polygon(polygon):
+        if polygon.area>=.1:return False
+        rectangle=polygon.minimum_rotated_rectangle
+        points=np.asarray(rectangle.exterior.coords) if rectangle.geom_type=='Polygon' else np.empty((0,2))
+        width=float(np.linalg.norm(np.diff(points,axis=0),axis=1).min()) if len(points) else 0.
+        if width<.01:
+            removed.append(dict(area_mm2=float(polygon.area),width_mm=width));return True
+        return False
+    for polygon in raw.to_polygons():
+        p=np.asarray(polygon)
+        area=abs(float(np.sum(p[:,0]*np.roll(p[:,1],-1)-p[:,1]*np.roll(p[:,0],-1))/2))
+        if area<.1:
+            rectangle=shapely.Polygon(p).minimum_rotated_rectangle
+            points=np.asarray(rectangle.exterior.coords) if rectangle.geom_type=='Polygon' else np.empty((0,2))
+            width=float(np.linalg.norm(np.diff(points,axis=0),axis=1).min()) if len(points) else 0.
+            if width<.01:
+                removed.append(dict(area_mm2=area,width_mm=width));continue
+        candidate=shapely.Polygon(p)
+        if not candidate.is_valid:
+            repaired_rings+=1;candidate=shapely.make_valid(candidate)
+        def polygonal(geometry):
+            nonlocal zero_area_paths
+            if geometry.geom_type=='Polygon':return [geometry]
+            if geometry.geom_type in ('LineString','LinearRing'):
+                zero_area_paths+=geometry.length;return []
+            if geometry.geom_type=='Point' or geometry.is_empty:return []
+            result=[]
+            for child in shapely.get_parts(geometry):
+                result.extend(polygonal(child))
+            return result
+        kept.extend(p for p in polygonal(candidate) if not micro_polygon(p))
+    material=even_odd(kept)
+    if not material.is_valid:material=shapely.make_valid(material)
+    loops=[];roles=[]
+    for polygon in shapely.get_parts(material):
+        if polygon.geom_type!='Polygon' or polygon.is_empty:continue
+        if micro_polygon(polygon):continue
+        loops.append(np.asarray(polygon.exterior.coords)[:-1]);roles.append('outer')
+        for ring in polygon.interiors:
+            if micro_polygon(shapely.Polygon(ring)):continue
+            loops.append(np.asarray(ring.coords)[:-1]);roles.append('inner')
+    section=manifold3d.CrossSection(loops,manifold3d.FillRule.EvenOdd)
+    part.mesh.metadata['section_checks']=dict(
+        numerical_cleanup_width_mm=.01, numerical_cleanup_max_contour_area_mm2=.1,
+        omitted_microcontours=removed, area_change_mm2=float(section.area()-raw.area()),
+        repaired_touching_rings=repaired_rings,omitted_zero_area_path_mm=float(zero_area_paths),
+        material_islands=0 if section.is_empty() else len(section.decompose()))
+    result=(z,section)
+    part.mesh._cache[key]=result
+    part.mesh._cache[key+'_loops']=loops
+    part.mesh._cache[key+'_roles']=roles
+    return result
 
 
 def _inside(point, polygon):
@@ -30,29 +111,21 @@ def _inside(point, polygon):
 
 
 def section_contours(part):
-    """Return the same middle-section polylines used by the SVG exporter."""
-    z = float(part.mesh.bounds[:, 2].mean())
-    section = part.mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+    """Slice the indexed native solid: avoid trimesh's path stitching artifacts."""
+    z,section=section_shape(part)
     contours = []
-    if section is not None:
-        for line in section.discrete:
-            points = np.asarray(line[:, :2], dtype=float)
+    if not section.is_empty():
+        for index,line in enumerate(part.mesh._cache['fabrication_section_v2_loops']):
+            points = np.asarray(line, dtype=float)
             if len(points) < 2:
                 continue
-            closed = bool(len(points) > 2 and np.linalg.norm(points[0]-points[-1]) <= 1e-6)
-            length = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
-            polygon = points[:-1] if closed else points
+            closed = len(points)>2
+            polygon = points[:-1] if np.linalg.norm(points[0]-points[-1]) <= 1e-8 else points
+            length = float(np.linalg.norm(polygon-np.roll(polygon,1,axis=0),axis=1).sum())
             area = abs(float(np.sum(polygon[:, 0]*np.roll(polygon[:, 1], -1) -
                                     polygon[:, 1]*np.roll(polygon[:, 0], -1))/2)) if closed else 0.0
-            contours.append(dict(points=polygon, closed=closed, length=length, area=area))
-    for contour in contours:
-        if not contour['closed']:
-            contour['role'] = 'open'
-            continue
-        depth = sum(other['closed'] and other['area'] > contour['area']+1e-9 and
-                    _inside(contour['points'][0], other['points'])
-                    for other in contours if other is not contour)
-        contour['role'] = 'inner' if depth % 2 else 'outer'
+            contours.append(dict(points=polygon, closed=closed, length=length, area=area,
+                role=part.mesh._cache['fabrication_section_v2_roles'][index]))
     return z, contours
 
 
@@ -77,6 +150,7 @@ def part_metrics(part, contours=None):
 def export_dxf(part, destination, page, cfg, records=(), contours=None, labels=None):
     """Write upright CAD labels and unchanged section contours at scale 1:1."""
     import ezdxf
+    from ezdxf.enums import TextEntityAlignment
     from marking import svg_labels
     if contours is None:
         z, contours = section_contours(part)
@@ -90,9 +164,10 @@ def export_dxf(part, destination, page, cfg, records=(), contours=None, labels=N
     document.units = 4
     document.header['$MEASUREMENT'] = 1
     for name, color, plot in [('CONTOURS', 7, 1), ('LABELS', 2, 1), ('LEADERS', 8, 1),
-                              ('SHEET_FRAME', 9, 0)]:
+                              ('SHEET_FRAME', 9, 0), ('PERIMETER_INFO',3,0), ('CHECK_REQUIRED',1,0)]:
         document.layers.new(name, dxfattribs={'color': color, 'plot': plot})
-    document.styles.new('LABEL', dxfattribs={'font': 'txt'})
+    document.styles.new('LABEL', dxfattribs={'font': 'cour.ttf'})
+    document.appids.new('BOAT_LABEL')
     model = document.modelspace()
     padding = cfg.svg_padding
     origin = part.mesh.bounds[0, :2]
@@ -105,10 +180,18 @@ def export_dxf(part, destination, page, cfg, records=(), contours=None, labels=N
     for fragment in labels:
         element = ET.fromstring(fragment)
         if element.tag == 'text':
-            model.add_text(element.text or '', dxfattribs={
+            position=np.array([float(element.get('x'))+padding,page[1]-float(element.get('y'))+padding])
+            transform=element.get('transform','')
+            angle=-float(re.findall(r'[-+]?(?:\d*\.\d+|\d+)',transform)[0]) if transform else 0.
+            width=float(element.get('textLength','0'))
+            entity=model.add_text(element.text or '', dxfattribs={
                 'layer': 'LABELS', 'style': 'LABEL', 'height': float(element.get('font-size')),
-                'insert': (float(element.get('x'))+padding,
-                           page[1]-float(element.get('y'))+padding), 'rotation': 0})
+                'insert': tuple(position), 'rotation': angle})
+            if width:
+                end=position+width*np.array([math.cos(math.radians(angle)),math.sin(math.radians(angle))])
+                entity.set_placement(tuple(position),tuple(end),align=TextEntityAlignment.FIT)
+            if element.get('data-connection'):
+                entity.set_xdata('BOAT_LABEL',[(1000,element.get('data-connection'))])
         elif element.tag == 'path':
             values = [float(x) for x in re.findall(r'[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?',
                                                    element.get('d', ''))]
@@ -117,6 +200,16 @@ def export_dxf(part, destination, page, cfg, records=(), contours=None, labels=N
                                (values[2]+padding, page[1]-values[3]+padding),
                                dxfattribs={'layer': 'LEADERS'})
     width, height = page[0]+2*padding, page[1]+2*padding
+    metrics=part_metrics(part,contours)
+    from marking import address
+    own=address(part.id,getattr(cfg,'_label_addresses',None))
+    for index,text in enumerate([f'PART {own} | SOURCE {part.id}',
+            'CUT %.6f mm | OUTER %.6f | INNER %.6f | OPEN %.6f'%(metrics['total_cut_mm'],metrics['outer_cut_mm'],metrics['inner_cut_mm'],metrics['open_cut_mm']),
+            'NET AREA %.6f mm2 | SCALE 1:1 | MM'%metrics['net_area_mm2']]):
+        model.add_text(text,dxfattribs={'layer':'PERIMETER_INFO','height':2.5,'insert':(0,-8-index*4)})
+    if not contours:
+        model.add_text('NO MANUFACTURABLE MID-SECTION - REVIEW 3D PART '+own,
+                       dxfattribs={'layer':'CHECK_REQUIRED','height':3,'insert':(10,10)})
     model.add_lwpolyline([(0, 0), (width, 0), (width, height), (0, height)], close=True,
                          dxfattribs={'layer': 'SHEET_FRAME'})
     document.set_modelspace_vport(height=height, center=(width/2, height/2))
@@ -137,11 +230,19 @@ def _export_svg(part, destination, page, cfg, contours, labels):
         xy = contour['points']-origin+cfg.margin
         if contour['closed']:
             xy = np.vstack((xy,xy[0]))
-        points = ' '.join('%.4f,%.4f' % (x,page[1]-y) for x,y in xy)
+        points = ' '.join('%.12f,%.12f' % (x,page[1]-y) for x,y in xy)
         lines.append('<polyline points="%s"/>' % points)
     # Every fabrication label is placed in the material. The old page header
     # could cross a full-page contour, so it is deliberately omitted here.
-    lines += ['</g>', *labels, '</g>', '</svg>']
+    lines += ['</g>', *labels]
+    if not contours:
+        from marking import address
+        own=address(part.id,getattr(cfg,'_label_addresses',None))
+        lines += ['<text x="10" y="20" fill="#b02020" font-size="4" data-layer="CHECK_REQUIRED">%s — REVIEW 3D</text>'%own,
+                  '<text x="10" y="30" fill="#b02020" font-size="3" data-layer="CHECK_REQUIRED">NO MANUFACTURABLE MID-SECTION</text>']
+    import json
+    from html import escape
+    lines += ['</g>','<metadata>'+escape(json.dumps(dict(source_part=part.id,metrics=part_metrics(part,contours),section_checks=part.mesh.metadata.get('section_checks',{}))))+'</metadata>','</svg>']
     Path(destination).write_text('\n'.join(lines),encoding='utf-8')
 
 
@@ -150,19 +251,29 @@ def export_sections(part, folder, page, cfg, records=()):
     import os
     from marking import svg_labels
     folder = Path(folder)
-    folder.mkdir(exist_ok=True)
+    folder.mkdir(parents=True,exist_ok=True)
     z, contours = section_contours(part)
     labels, notes = svg_labels(part,page,cfg,records,z)
     formats = ('svg', 'dxf') if cfg.export_format == 'both' else (cfg.export_format,)
     for extension in formats:
-        target = folder/(part.id+'.'+extension)
+        target = section_path(folder,part.id,extension,review=not contours)
+        target.parent.mkdir(parents=True,exist_ok=True)
         temporary = target.with_name(target.name+'.tmp')
         if extension == 'svg':
             _export_svg(part,temporary,page,cfg,contours,labels)
         else:
             export_dxf(part,temporary,page,cfg,records,contours,labels)
         os.replace(temporary, target)
-    return part_metrics(part, contours), list(dict.fromkeys(notes))
+    metrics=part_metrics(part,contours)
+    if metrics['outer_contours']>1:
+        notes.append(part.id+': среднее сечение содержит несколько отдельных областей материала; проверьте 3D-деталь перед изготовлением.')
+    omitted=part.mesh.metadata.get('section_checks',{}).get('omitted_microcontours',[])
+    if omitted:
+        notes.append(part.id+': из чертежа исключены численные микроконтуры: %d; ширина <0,01 мм и площадь <0,1 мм². 3D-геометрия сохранена.'%len(omitted))
+    checks=part.mesh.metadata.get('section_checks',{})
+    if checks.get('repaired_touching_rings'):
+        notes.append(part.id+': касающиеся кольца сечения разделены без изменения площади; вырожденные ответвления вынесены из контура реза.')
+    return metrics, list(dict.fromkeys(notes))
 
 
 def aggregate_metrics(parts):

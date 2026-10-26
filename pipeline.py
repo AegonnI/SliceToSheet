@@ -104,8 +104,13 @@ def _make_shell(mesh, cfg, output, log, cancel):
 
 
 def _part_exports_present(output, pid, cfg):
+    from sections import section_path
     formats = ('svg', 'dxf') if cfg.export_format == 'both' else (cfg.export_format,)
-    paths = [output/'sections_a4'/(pid+'.'+extension) for extension in formats]
+    paths=[]
+    for extension in formats:
+        path=section_path(output/'sections_a4',pid,extension)
+        if not path.is_file():path=section_path(output/'sections_a4',pid,extension,True)
+        paths.append(path)
     if cfg.export_parts_stl:
         paths.append(output/'stl'/(pid+'.stl'))
     return all(path.is_file() for path in paths)
@@ -197,7 +202,10 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
             if get('complete',False):
                 report_path = output/'assembly.json'
                 report = json.loads(report_path.read_text(encoding='utf-8')) if report_path.is_file() else None
-                if (report and all(_part_exports_present(output, p['id'], cfg) for p in report['parts']) and
+                from sections import EXPORT_REVISION
+                from nesting import exports_present
+                if (report and report.get('export_revision')==EXPORT_REVISION and all(_part_exports_present(output, p['id'], cfg) for p in report['parts']) and
+                        exports_present(output,report.get('sheet_nesting'),cfg) and (output/'Inspection'/'index.html').is_file() and
                         (not cfg.export_assembly_stl or (output/'assembly.stl').is_file()) and
                         (output/'metrics.csv').is_file()):
                     (output/'INCOMPLETE.txt').unlink(missing_ok=True)
@@ -335,14 +343,16 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
         if len(ids)>1:
             final_notes.extend(p+': НЕТ СОЕДИНЕНИЙ. Требуется ручная доработка.' for p in ids if not adjacency[p])
         if len(groups)>1: final_notes.append('Сборка состоит из %d несвязанных групп деталей.'%len(groups))
-        from sections import export_sections, aggregate_metrics, write_metrics_csv
+        from sections import export_sections, aggregate_metrics, write_metrics_csv, EXPORT_REVISION
+        from marking import build_addresses
+        cfg._label_addresses=build_addresses(ids)
         (output/'sections_a4').mkdir(exist_ok=True)
         if cfg.export_parts_stl:
             (output/'stl').mkdir(exist_ok=True)
         for index,pid in enumerate(ids):
             cancel()
             row=db.execute('SELECT cell,info FROM parts WHERE id=?',(pid,)).fetchone()
-            if row[1] is not None and 'metrics' in json.loads(row[1]) and _part_exports_present(output,pid,cfg): continue
+            if row[1] is not None and json.loads(row[1]).get('export_revision')==EXPORT_REVISION and _part_exports_present(output,pid,cfg): continue
             blob=db.execute('SELECT mesh FROM parts WHERE id=?',(pid,)).fetchone()[0]
             part=Part(pid,tuple(json.loads(row[0])),unpack(blob))
             del blob
@@ -360,7 +370,9 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
                       layer_start_mm=part.cell[2]*cfg.thickness,
                       layer_end_mm=min((part.cell[2]+1)*cfg.thickness,get('size')[2]),
                       size=part.mesh.extents.tolist(),volume=float(part.mesh.volume),
-                      marking=address(pid),links=links_for(pid,part_records[pid]),marking_warnings=marking_notes,
+                      marking=address(pid,cfg._label_addresses),links=links_for(pid,part_records[pid],cfg._label_addresses),marking_warnings=marking_notes,
+                      export_revision=EXPORT_REVISION,
+                      section_checks=part.mesh.metadata.get('section_checks',{}),
                       metrics=metrics)
             db.execute('UPDATE parts SET info=? WHERE id=?',(json.dumps(info),pid))
             next_layer = int(ids[index+1].split('_')[0][1:])-1 if index+1 < len(ids) else None
@@ -395,11 +407,15 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
         with (output/'connections.csv').open('w',newline='',encoding='utf-8-sig') as f:
             writer=csv.DictWriter(f,fieldnames=fields);writer.writeheader();writer.writerows(records)
         report=dict(settings=asdict(cfg),source=str(source),source_to_assembly=get('transform'),size=get('size'),
+                    export_revision=EXPORT_REVISION,
                     layer_count=count,parts=info,connections=records,warnings=final_notes,connected_groups=groups,
                     volume_before_holes=raw,volume_after_holes=sum(p['volume'] for p in info),
                     page_mm=page,metrics=aggregate_metrics(info),
                     source_model_surface_area_mm2=get('source_model_surface_area_mm2'),
                     model_surface_area_mm2=get('model_surface_area_mm2'))
+        if cfg.nest_sheets:
+            from nesting import nest_job
+            report['sheet_nesting']=nest_job(output,info,page,cfg,cancel,log,notify)
         if get('simplification') is not None:
             report['simplification']=get('simplification')
         if cfg.make_shell:
@@ -425,6 +441,14 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
                 note='Проверены полные тройки каждого стыка. Смешанные тройки отверстий от разных стыков и все возможные положения целых деталей не проверены.')
         atomic_json(output/'assembly.json',report)
         write_metrics_csv(output/'metrics.csv',info,report['metrics'])
+        with (output/'print_addresses.csv').open('w',newline='',encoding='utf-8-sig') as stream:
+            writer=csv.writer(stream)
+            writer.writerow(['print_number','source_part_id','layer','grid_row','grid_column','component'])
+            from marking import tokens
+            for p in info:writer.writerow([p['marking'],p['id'],*tokens(p['id'])])
+        from inspection import write_inspection
+        report['inspection']=write_inspection(output,report)
+        atomic_json(output/'assembly.json',report)
         totals=report['metrics']['totals']
         metrics_text=('Площадь материала средних сечений: %.6f м².\n'
                       'Длина внешних контуров: %.6f м; внутренних: %.6f м; открытых: %.6f м; всего: %.6f м.\n'
@@ -444,10 +468,16 @@ def _locked(source, output, cfg, log, resume, cancel, notify):
             '\n'.join(final_notes or ['Все соединения размещены.'])+
             '\n\nSVG/DXF — среднее сечение, а не контур всей объёмной детали. Масштаб 1:1; печатать 100%.\n'
             'Координаты CSV общие; для локальных вычтите assembly_offset из JSON.\n'
-            'Маркировка L.R.C.компонент: слой, строка, столбец, компонент; номера начинаются с 1.\n'
+            'Маркировка — три числа через пробел; печатные номера уникальны. Соответствие исходным деталям: print_addresses.csv.\n'
+            'SVG и DXF разложены по форматам и слоям внутри sections_a4. Дополнительная раскладка: Sheets. Проверки: Inspection/index.html.\n'
             'DOWN — к нижнему слою, UP — к верхнему, SIDE — внутри слоя; K — общий номер шпильки.\n'
             'Алгоритм проверяет геометрию, но не прочность и не порядок физической сборки.\n'+
             (report['key_validation']['note']+'\n' if cfg.unique_keys else ''),encoding='utf-8')
+        legacy=[p for p in (output/'sections_a4').iterdir() if p.is_file() and p.suffix.lower() in ('.svg','.dxf')]
+        if legacy:
+            archive=output/'backups'/('flat_exports_'+time.strftime('%Y%m%d_%H%M%S'))
+            archive.mkdir(parents=True,exist_ok=False)
+            for path in legacy:path.replace(archive/path.name)
         with db: put('complete',True)
         (output/'INCOMPLETE.txt').unlink(missing_ok=True)
         notify('Готово',1,1);log('Готово: %d деталей, %d шпилек, %d замечаний.'%(len(ids),len(records),len(final_notes)))

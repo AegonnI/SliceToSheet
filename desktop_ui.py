@@ -110,7 +110,7 @@ class App(QtWidgets.QMainWindow):
     def __init__(self):
         application()
         super().__init__()
-        self.setWindowTitle('SliceToSheet 1.2.1 — модель → слои и листы A4')
+        self.setWindowTitle('SliceToSheet 1.3.0 — модель → слои и листы A4')
         self.resize(1440, 940)
         self.setMinimumSize(1040, 680)
         self.busy = False
@@ -264,6 +264,11 @@ class App(QtWidgets.QMainWindow):
         self.export_assembly.setChecked(True)
         export.form.addRow(self.export_parts)
         export.form.addRow(self.export_assembly)
+        self.nest_sheets=QtWidgets.QCheckBox('Дополнительно уплотнить детали на A4')
+        self.nest_sheets.setChecked(True)
+        export.form.addRow(self.nest_sheets)
+        self.number(export,'sheet_gap','Между деталями на листе, мм',7,0,100)
+        export.form.addRow(self.note('Отдельные детали остаются по одной на лист. Дополнительная раскладка сохраняется в Sheets; масштаб 1:1.'))
         export.form.addRow(self.note('Площади, периметры, карта сборки и база продолжения сохраняются независимо от STL.'))
 
         advanced = self.section('advanced', 'Дополнительные параметры', False)
@@ -514,6 +519,7 @@ class App(QtWidgets.QMainWindow):
                        stringers=self.stringers.isChecked(), stringer_up=self.stringer_up.currentData(),
                        export_format=self.export_format.currentData(), export_parts_stl=self.export_parts.isChecked(),
                        export_assembly_stl=self.export_assembly.isChecked())
+        cfg.nest_sheets=self.nest_sheets.isChecked()
         cfg.validate()
         return cfg
 
@@ -532,6 +538,7 @@ class App(QtWidgets.QMainWindow):
         self.export_format.setCurrentIndex(max(0, self.export_format.findData(cfg.export_format)))
         self.export_parts.setChecked(cfg.export_parts_stl)
         self.export_assembly.setChecked(cfg.export_assembly_stl)
+        self.nest_sheets.setChecked(cfg.nest_sheets)
         self.model_scale = cfg.scale
         if self.model_data is not None and cfg.target_length:
             self.model_scale = cfg.target_length/self.model_data.extents['XYZ'.index(cfg.axis)]

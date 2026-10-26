@@ -14,3 +14,4 @@ ezdxf==1.4.5
 open3d==0.20.0
 scikit-image==0.26.0
 rtree==1.4.1
+shapely==2.2.0
